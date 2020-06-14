@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sensu-go-sandbox.fullname" . }}
+  labels:
+    {{- include "sensu-go-sandbox.labels" . | nindent 4 }}
+spec:
+{{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+{{- end }}
+  selector:
+    matchLabels:
+      {{- include "sensu-go-sandbox.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+    {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      labels:
+        {{- include "sensu-go-sandbox.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sensu-go-sandbox.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: sensu-backend
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["/opt/sensu/bin/sensu-entrypoint.sh"]
+          env:
+            - name: SENSU_BACKEND_CLUSTER_ADMIN_USERNAME
+              value: admin
+            - name: SENSU_BACKEND_CLUSTER_ADMIN_PASSWORD
+              value: P@ssw0rd!
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/opt/sensu/bin/sensu-backend", "start", "--log-level", "debug"]
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: dashboard-port
+              containerPort: 3000
+              protocol: TCP
+            - name: api-listen-port
+              containerPort: 8080
+              protocol: TCP
+            - name: agent-port
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: api-listen-port
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: api-listen-port
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        - name: sensu-agent
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          command: ["/opt/sensu/bin/sensu-agent", "start", "--backend-url", "ws://localhost:8081", "--log-level", "debug", "--subscriptions", "localhost", "--api-host", "0.0.0.0"]
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: api-port
+              containerPort: 3031
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: api-port
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: api-port
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
